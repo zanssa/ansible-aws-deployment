@@ -1,0 +1,35 @@
+:toc:
+:toclevels: 6
+
+= Ansible-AWS-Deployment
+
+
+toc::[]
+
+== Description
+
+This repo contains Ansible Playbooks developed to help automate the deployment of some AWS Services as part of school projects.
+
+== Requirements
+
+* Requires `Ansible` to be installed on the control node. You can follow https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html[this] guide to help you with the installation based on the OS you are running.
+
+* Boto, a python library to allow users to interact with AWS services, needs also to be installed on Ansible Controller.
+
+* AWS user credentials.
+
+== Directory structure
+
+[,yaml]
+----
+
+.
+├── ansible.cfg
+├── AWS-DBS-Playbook.yml     # take a snapshot for RDS instance and copy it to another Region on AWS
+├── AWS-DR-Playbook3.yml     # Create AMI Image and launch EC2 instance from the EBS Snapshot
+├── AWS-EC2-Playbook.yml     # A playbook to take EBS Snapshot and copy it to another Region on AWS
+├── AWS-NET-Playbook.yml     # A playbook to build the network infrastructure on AWS
+├── hosts
+└── README.asciidoc
+
+----

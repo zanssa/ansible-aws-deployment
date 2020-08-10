@@ -1,0 +1,201 @@
+---
+- hosts: localhost
+  connection: local
+  remote_user: Administrator
+
+  vars_files:
+    - Vars/var.yml
+    - Vars/aws.yml
+
+  tasks:
+    - name: Automating AWS Infrastructure | Provision the Network Infrastrcture | Create VPC
+      ec2_vpc_net:
+        name: "{{ VPC_NAME }}"
+        cidr_block: "{{ VPC_CIDR_BLOCK }}"
+        dns_support: yes
+        dns_hostnames: yes 
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        state: present
+      register: VPCID
+ 
+    - name: Automating AWS Infrastructure | Provision the Network Infrastrcture | Set VPC ID in a Variable
+      set_fact:
+        vpc_id: "{{ VPCID.vpc.id }}"
+
+    - name: Automating AWS Infrastructure | Provision the Network Infrastrcture | Create Public Subnet
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc_id }}"
+        cidr: "{{ PUBLIC_SUBNET_CIDR }}"
+        region: "{{ VPC_REGION }}"
+        az: "{{ PUBLIC_SUBNET_AZ }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        resource_tags:
+          Name: "{{ PUBLIC_TAG }}"
+      register: PUBLICSUBNET
+    
+    - name: Automating AWS Infrastructure | Provision the Network Infrastrcture | Set Public Subnet ID in a Variable
+      set_fact: 
+        public_subnet_id: "{{ PUBLICSUBNET.subnet.id }}"
+
+    - name: Automating AWS Infrastructure | Provision the Network Infrastrcture | Create Private Subnet-1
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        az: "{{ PRIVATE_SUBNET_AZ1 }}"
+        cidr: "{{ PRIVATE_SUBNET_CIDR1 }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        resource_tags:
+          Name: "{{ PRIVATE_TAG1 }}"
+      register: PRIVATESUBNET
+
+    - name: Provisioning AWS Network Infrastrcture | Set Private Subnet ID in a Variable.
+      set_fact:
+        private_subnet_id: "{{ PRIVATESUBNET.subnet.id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create Private Subnet_2.
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        az: "{{ PRIVATE_SUBNET_AZ2 }}"
+        cidr: "{{ PRIVATE_SUBNET_CIDR2 }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        resource_tags:
+          Name: "{{ PRIVATE_TAG2 }}"
+      register: PRIVATESUBNET2
+
+    - name: Provisioning AWS Network Infrastrcture | Set Private Subnet ID in a Variable.
+      set_fact:
+        private_subnet_id2: "{{ PRIVATESUBNET2.subnet.id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create Internet Gateway.
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        state: present
+      register: VPCIGW
+
+    - name: Provisioning AWS Network Infrastrcture | Set Internet Gateway ID in a Variable.
+      set_fact:
+        igw_id: "{{ VPCIGW.gateway_id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create Nat Gateway and Allocate New EIP.
+      ec2_vpc_nat_gateway:
+        state: present
+        subnet_id: "{{ private_subnet_id }}"
+        wait: yes
+        region: "{{ VPC_REGION }}"
+      register: new_nat_gateway
+
+    - name: Provisioning AWS Network Infrastrcture | Set Nat Gateway ID in a Variable
+      set_fact:
+        nat_gateway_id: "{{ new_nat_gateway.nat_gateway_id }}"
+
+    - pause: seconds=60
+
+    - name: Provisioning AWS Network Infrastrcture | Set Up a Public Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        tags:
+          Name: "Public RTB"
+        subnets:
+          - "{{ public_subnet_id }}"
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ igw_id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Set Up a Private Route Table
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        tags:
+          Name: "Private RTB"
+        subnets:
+          - "{{ private_subnet_id }}"
+          - "{{ private_subnet_id2 }}"
+        routes:
+          - dest: "0.0.0.0/0"
+            gateway_id: "{{ nat_gateway_id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create a Security Group to Control Traffic to the Public Subnet
+      ec2_group: 
+        name: "{{ MAIN_SG_NAME }}"
+        description: "{{ MAIN_SG_DESC }}"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        rules:
+          - proto: "tcp"
+            from_port: "80"
+            to_port: "80"
+            cidr_ip: "0.0.0.0/0"
+          - proto: "tcp"
+            from_port: "443"
+            to_port: "443"
+            cidr_ip: "0.0.0.0/0"
+          - proto: "tcp"
+            from_port: "22"
+            to_port: "22"
+            cidr_ip: "0.0.0.0/0"
+      register: main_sg
+
+    - name: Provisioning AWS Network Infrastrcture | Set the Security Group ID in a Variable
+      set_fact:
+        main_sg_id: "{{ main_sg.group_id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create a Security Group to Control Traffic to/from the Private Subnet
+      ec2_group:
+        name: "{{ PRV_SG_NAME }}"
+        description: "{{ PRV_SG_DESC }}"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        rules:
+          - proto: "tcp"
+            from_port: "22"
+            to_port: "22"
+            group_id: "{{ main_sg_id }}"
+          - proto: "tcp"
+            from_port: "3306"
+            to_port: "3306"
+            group_id: "{{ main_sg_id }}"
+        rules_egress:
+          - proto: "tcp"
+            from_port: "3306"
+            to_port: "3306"
+            group_id: "{{ main_sg_id }}"
+      register: sec_sg
+
+    - name: Set the Security Group ID in a Variable
+      set_fact:
+        sec_sg_id: "{{ sec_sg.group_id }}"
+
+    - name: Provisioning AWS Network Infrastrcture | Create a Security Group to Control Traffic from the Public Subnet
+      ec2_group:
+        name: "{{ MAIN_SG_NAME }}"
+        description: "{{ MAIN_SG_DESC }}"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ VPC_REGION }}"
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+      rules_egress:
+        - proto: "tcp"
+          from_port: "3306"
+          to_port: "3306"
+          group_id: "{{ sec_sq_id }}"

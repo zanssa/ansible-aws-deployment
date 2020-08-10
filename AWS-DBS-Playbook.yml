@@ -1,0 +1,100 @@
+---
+- hosts: localhost
+  connection: local
+  remote_user: Administrator
+
+  vars_files:
+    - Vars/var.yml
+    - Vars/aws.yml
+
+  vars_prompt:
+    - name: "frequency"
+      prompt: "Please enter the frequency of reating the snapshot: Ex: Daily, Weekly, Monthly"
+      private: no
+
+  tasks:
+    - name: Automating RDS AWS Infrastructure | Find Private Subnets
+      ec2_vpc_subnet_facts:
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        region: "{{ SNAPSHOT_REGION }}"
+        filters:
+          "tag:Name": "{{ PRIVATE_TAG2 }}"
+      register: vpc_subnet_info
+
+    - ec2_vpc_subnet_facts:
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        region: "{{ SNAPSHOT_REGION }}"
+        filters:
+          "tag:Name": "{{ PRIVATE_TAG1 }}"
+      register: vpc_subnet_info2
+
+    - name: Automating RDS AWS Infrastructure | Print out Private Subnets
+      debug:
+        var: vpc_subnet_info.subnets[0].id
+
+    - debug:
+        var: vpc_subnet_info2.subnets[0].id
+
+    - name: Automating RDS AWS Infrastructure | Set Private Subnets IDs in Variables
+      set_fact:
+        subnet_id1: "{{ vpc_subnet_info.subnets[0].id }}"
+        subnet_id2: "{{ vpc_subnet_info2.subnets[0].id }}"
+
+    - name: Automating RDS AWS Infrastructure | Create Multi-AZ RDS Subnet Group
+      rds_subnet_group:
+        state: present
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        region: "{{ SNAPSHOT_REGION }}"
+        name: "{{ RDS_SUBNET_G_NAME }}"
+        description: "{{ RDS_DESC }}"
+        subnets: 
+          - "{{ subnet_id1 }}"
+          - "{{ subnet_id2 }}"
+
+    - name: Automating RDS AWS Infrastructure | Take Snapshot to RDS Instance 
+      rds:
+        command: snapshot
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        region: "{{ SNAPSHOT_SOURCE }}"
+        instance_name: "{{ RDS_NAME }}"
+        snapshot: "snapshot-{{ RDS_NAME }}-{{ frequency }}-{{ ansible_date_time.date }}"
+        wait: yes
+        wait_timeout: 700
+
+    - name: Automating RDS AWS Infrastructure | Print out the information of RDS Snapshot
+      rds:
+        command: facts
+        aws_access_key: "{{ AWS_ACCESS_KEY }}"
+        aws_secret_key: "{{ AWS_SECRET_KEY }}"
+        region: "{{ SNAPSHOT_SOURCE }}"
+        snapshot: "snapshot-{{ RDS_NAME }}-{{ frequency }}-{{ ansible_date_time.date }}"
+      register: snapshot_info
+
+    - debug:
+        var: snapshot_info
+
+    - name: Automating RDS AWS Infrastructure | Set Snapshot Name in a Variable
+      set_fact:
+        snapshotname: "snapshot-{{ RDS_NAME }}-{{ frequency }}-{{ ansible_date_time.date }}"
+
+    - name: Automating RDS AWS Infrastructure | Copy RDS Snapshot to DR Region | Setup AWS CLI (1/3)
+      shell: >
+        aws configure set aws_access_key_id "{{ AWS_ACCESS_KEY }}"
+
+    - name: Automating RDS AWS Infrastructure | Copy RDS Snapshot to DR Region | Setup AWS CLI (2/3)
+      shell: >
+        aws configure set aws_secret_access_key "{{ AWS_SECRET_KEY }}"
+
+    - name: Automating RDS AWS Infrastructure | Copy RDS Snapshot to DR Region | Setup AWS CLI (3/3)
+      shell: >
+        aws configure set region "{{ VPC_REGION }}"
+
+    - name: Automating RDS AWS Infrastructure | Copy RDS Snapshot to DR Region | Copy RDS Snapshot to DR Region
+      shell: >
+        aws rds copy-db-snapshot \
+        --source-db-snapshot-identifier arn:aws:rds:{{ SNAPSHOT_SOURCE }}:{{ ACCOUNT_ID }}:snapshot:{{ snapshotname }} \
+        --target-db-snapshot-identifier {{ snapshotname }}
